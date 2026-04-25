@@ -5,9 +5,9 @@ export default defineConfig({
   modules: ['@wxt-dev/module-svelte'],
   manifest: {
     name: 'SukiLeet',
-    description: 'Push LeetCode solutions to GitHub',
+    description: 'Push LeetCode solutions to GitHub, GitLab, and Codeberg',
     permissions: ['storage'],
-    host_permissions: ['https://api.github.com/*'],
+    host_permissions: ['https://*/*'],
   },
   vite: () => ({
     optimizeDeps: {

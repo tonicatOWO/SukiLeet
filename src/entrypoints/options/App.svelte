@@ -1,13 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import {
-    githubToken,
-    githubRepo,
-    githubBranch,
+    repoToken,
+    repoUrl,
+    repoBranch,
     separateFolder,
     customDir,
     keyboardShortcut,
   } from '../../lib/storage'
+  import { parseRepoUrl } from '../../lib/utils'
 
   const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
@@ -24,9 +25,9 @@
 
   onMount(async () => {
     const [token, repo, branch, separate, custom, shortcut] = await Promise.all([
-      githubToken.getValue(),
-      githubRepo.getValue(),
-      githubBranch.getValue(),
+      repoToken.getValue(),
+      repoUrl.getValue(),
+      repoBranch.getValue(),
       separateFolder.getValue(),
       customDir.getValue(),
       keyboardShortcut.getValue(),
@@ -47,14 +48,21 @@
     saveStatus = 'idle'
     errorMsg = ''
 
-    const githubUrlPattern = /^https:\/\/github\.com\/[\w-]+\/[\w.-]+$/
-    if (!githubUrlPattern.test(repoInput)) {
-      errorMsg = 'Invalid GitHub URL (https://github.com/username/repository)'
+    const parsedRepo = parseRepoUrl(repoInput)
+    if (!parsedRepo) {
+      errorMsg = 'Invalid repository URL. Use GitHub, GitLab, or Codeberg URL.'
       saveStatus = 'error'
       return
     }
-    if (!tokenInput.startsWith('ghp_') && !tokenInput.startsWith('github_pat_')) {
-      errorMsg = 'Token must start with "ghp_" or "github_pat_"'
+
+    if (!tokenInput.trim()) {
+      errorMsg = 'Token cannot be empty'
+      saveStatus = 'error'
+      return
+    }
+
+    if (parsedRepo.platform === 'github' && !tokenInput.startsWith('ghp_') && !tokenInput.startsWith('github_pat_')) {
+      errorMsg = 'GitHub token must start with "ghp_" or "github_pat_"'
       saveStatus = 'error'
       return
     }
@@ -69,9 +77,9 @@
 
     try {
       await Promise.all([
-        githubToken.setValue(tokenInput),
-        githubRepo.setValue(cleanRepo),
-        githubBranch.setValue(branchInput),
+        repoToken.setValue(tokenInput),
+        repoUrl.setValue(cleanRepo),
+        repoBranch.setValue(branchInput),
         separateFolder.setValue(separateFolderInput),
         customDir.setValue(customDirInput),
         keyboardShortcut.setValue({ key: shortcutKey.toLowerCase(), modifier: shortcutModifier }),
@@ -119,20 +127,16 @@
 
     <div class="field">
       <label for="token">
-        GitHub Token
-        <a
-          href="https://scribehow.com/shared/Generating_a_personal_access_token_on_GitHub__PUPxxuxIRQmlg1MUE-2zig"
-          target="_blank"
-          rel="noreferrer"
-        >Generate Token?</a>
+        Repository Token
       </label>
       <input
         id="token"
         type="password"
         bind:value={tokenInput}
-        placeholder="ghp_... or github_pat_..."
+        placeholder="GitHub PAT / GitLab token / Codeberg token"
         required
       />
+      <small class="hint">Use token with repo write access for selected platform.</small>
     </div>
 
     <div class="field">
@@ -152,9 +156,20 @@
           <input type="radio" bind:group={branchInput} value="main" /> main
         </label>
         <label class="radio-label">
-          <input type="radio" bind:group={branchInput} value="master" /> master
+          <input type="radio" bind:group={branchInput} value="master" /> trunk
+        </label>
+        <label class="radio-label">
+          <input type="radio" bind:group={branchInput} value="custom" /> custom
         </label>
       </div>
+      {#if branchInput === 'custom'}
+        <input
+          type="text"
+          placeholder="Enter custom branch"
+          bind:value={branchInput}
+          class="custom-branch-input"
+        />
+      {/if}
     </fieldset>
 
     <fieldset class="field">

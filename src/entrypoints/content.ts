@@ -1,14 +1,19 @@
 import '../assets/content.css'
 import {
-  githubToken,
-  githubRepo,
-  githubBranch,
+  repoToken,
+  repoUrl as repoUrlStorage,
+  repoBranch,
   separateFolder as separateFolderStorage,
   customDir as customDirStorage,
   keyboardShortcut as shortcutStorage,
   solutionsPushed as solutionsPushedStorage,
   dailyChallengesCount,
 } from '../lib/storage'
+import { parseRepoUrl } from '../lib/utils'
+import * as github from '../lib/github'
+import * as gitlab from '../lib/gitlab'
+import * as codeberg from '../lib/codeberg'
+import { getFriendlyWriteError } from '../lib/repo-write'
 
 const FILE_EXTENSIONS: Record<string, string> = {
   C: '.c',
@@ -98,7 +103,7 @@ interface ProblemInfo {
   language: string
 }
 
-interface GithubConfig {
+interface RepoConfig {
   token: string
   repo: string
   branch: string
@@ -311,18 +316,18 @@ function updateButtonLabels() {
   })
 }
 
-async function getGithubConfig(): Promise<GithubConfig> {
+async function getRepoConfig(): Promise<RepoConfig> {
   const [token, repo, branch, separate, custom] = await Promise.all([
-    githubToken.getValue(),
-    githubRepo.getValue(),
-    githubBranch.getValue(),
+    repoToken.getValue(),
+    repoUrlStorage.getValue(),
+    repoBranch.getValue(),
     separateFolderStorage.getValue(),
     customDirStorage.getValue(),
   ])
   return { token, repo, branch, separateFolder: separate, customDir: custom }
 }
 
-function isConfigComplete(config: GithubConfig): boolean {
+function isConfigComplete(config: RepoConfig): boolean {
   return !!(config.token && config.repo && config.branch)
 }
 
@@ -334,7 +339,7 @@ function getPushButton(): HTMLButtonElement | null {
 }
 
 async function handlePushClick() {
-  const config = await getGithubConfig()
+  const config = await getRepoConfig()
 
   if (!isConfigComplete(config)) {
     browser.runtime.openOptionsPage()
@@ -360,8 +365,8 @@ async function handlePushClick() {
     return
   }
 
-  const [userName, repoName] = config.repo.split('/').slice(3, 5)
-  if (!userName || !repoName) {
+  const parsed = parseRepoUrl(config.repo)
+  if (!parsed) {
     alert('SukiLeet Error: Invalid repository URL. Please check your settings.')
     browser.runtime.openOptionsPage()
     return
@@ -372,18 +377,7 @@ async function handlePushClick() {
   pushBtn.classList.add('loading')
 
   try {
-    await pushToGithub(
-      userName,
-      repoName,
-      config.branch,
-      fileName,
-      solution,
-      commitMsg,
-      config.token,
-      config.separateFolder,
-      config.customDir,
-      problemInfo,
-    )
+    await pushSolution(config, parsed, fileName, solution, commitMsg, problemInfo)
 
     pushBtn.classList.remove('loading')
     pushBtn.classList.add('success')
@@ -406,7 +400,7 @@ async function handlePushClick() {
       // non-critical
     }
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Unknown error'
+    const msg = error instanceof Error ? getFriendlyWriteError(error.message) : 'Unknown error'
     alert(`SukiLeet Error: ${msg}`)
 
     pushBtn.classList.remove('loading')
@@ -419,26 +413,22 @@ async function handlePushClick() {
   }
 }
 
-async function pushToGithub(
-  userName: string,
-  repoName: string,
-  branch: string,
+async function pushSolution(
+  config: RepoConfig,
+  parsed: ReturnType<typeof parseRepoUrl> & object,
   fileName: string,
-  content: string,
+  solution: string,
   commitMsg: string,
-  token: string,
-  separateFolder: string,
-  customDir: string,
   problemInfo: ProblemInfo,
 ) {
   if (!fileName?.trim()) throw new Error('Invalid file name. Please try again.')
-  if (!content?.trim()) throw new Error('No solution content found.')
+  if (!solution?.trim()) throw new Error('No solution content found.')
 
   let filePath = fileName
 
-  if (customDir) {
-    filePath = `${customDir}/${fileName}`
-  } else if (separateFolder === 'yes') {
+  if (config.customDir) {
+    filePath = `${config.customDir}/${fileName}`
+  } else if (config.separateFolder === 'yes') {
     try {
       const [date, dailyProblemNum] = await getDailyChallenge()
       if (dailyProblemNum === problemInfo.probNum) {
@@ -453,103 +443,17 @@ async function pushToGithub(
 
   if (!filePath?.trim()) throw new Error('Failed to generate a valid file path.')
 
-  return pushFileToRepo(userName, repoName, filePath, branch, content, commitMsg, token)
-}
-
-async function pushFileToRepo(
-  userName: string,
-  repoName: string,
-  filePath: string,
-  branch: string,
-  content: string,
-  commitMsg: string,
-  token: string,
-) {
-  const BASE_URL = 'https://api.github.com/repos'
-  const apiUrl = `${BASE_URL}/${userName}/${repoName}/contents/${filePath}`
-
-  const repoCheck = await fetch(`${BASE_URL}/${userName}/${repoName}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-
-  if (!repoCheck.ok) {
-    const err = await repoCheck.json()
-    if (repoCheck.status === 404)
-      throw new Error(`Repository not found: ${userName}/${repoName}`)
-    if (repoCheck.status === 401) throw new Error('Authentication failed. Token may be invalid.')
-    if (repoCheck.status === 403) throw new Error('Access forbidden. Check token permissions.')
-    throw new Error(`Repository access error: ${err.message || 'Unknown error'}`)
+  switch (parsed.platform) {
+    case 'github':
+      await github.pushFileToRepo(parsed.owner, parsed.repoName, filePath, config.branch, solution, commitMsg, config.token)
+      break
+    case 'gitlab':
+      await gitlab.pushFileToRepo(parsed.host, parsed.projectPath, filePath, config.branch, solution, commitMsg, config.token)
+      break
+    case 'codeberg':
+      await codeberg.pushFileToRepo(parsed.owner, parsed.repoName, filePath, config.branch, solution, commitMsg, config.token)
+      break
   }
-
-  const encodedContent = btoa(unescape(encodeURIComponent(content)))
-  const requestBody: Record<string, string> = {
-    message: commitMsg,
-    content: encodedContent,
-    branch,
-  }
-
-  const fileExistsRes = await fetch(`${apiUrl}?ref=${branch}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-
-  if (fileExistsRes.ok) {
-    const existing = await fileExistsRes.json()
-    if (existing?.sha) requestBody.sha = existing.sha
-  } else if (fileExistsRes.status !== 404) {
-    const err = await fileExistsRes.json()
-    if (fileExistsRes.status === 403)
-      throw new Error('Permission denied. Token needs "contents: write" permission.')
-    if (fileExistsRes.status === 401) throw new Error('Authentication failed.')
-    throw new Error(`Error checking file: ${err.message || 'Unknown error'}`)
-  }
-
-  let response = await fetch(apiUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify(requestBody),
-  })
-
-  let retryCount = 0
-  while (response.status === 409 && retryCount < 3) {
-    retryCount++
-    await sleep(500)
-    const latestRes = await fetch(`${apiUrl}?ref=${branch}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (!latestRes.ok) continue
-    const latest = await latestRes.json()
-    if (latest?.sha) {
-      requestBody.sha = latest.sha
-      response = await fetch(apiUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(requestBody),
-      })
-      if (response.ok) break
-    }
-  }
-
-  if (!response.ok) {
-    let msg = `GitHub API Error: ${response.status}`
-    try {
-      const err = await response.json()
-      msg += ` - ${err.message || 'Unknown error'}`
-    } catch {}
-    throw new Error(msg)
-  }
-
-  return true
-}
-
-async function updateRepoDescription(token: string, repo: string) {
-  const [userName, repoName] = repo.split('/').slice(3, 5)
-  await fetch(`https://api.github.com/repos/${userName}/${repoName}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      description: 'Managed by SukiLeet extension',
-    }),
-  })
 }
 
 async function getDailyChallenge(): Promise<[string, string]> {

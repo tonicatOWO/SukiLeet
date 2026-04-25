@@ -1,5 +1,38 @@
 import type { DayValueI, StreakI } from './types'
 
+export type Platform = 'github' | 'gitlab' | 'codeberg'
+
+export interface ParsedRepo {
+  platform: Platform
+  host: string
+  owner: string
+  repoName: string
+  projectPath: string
+}
+
+export function parseRepoUrl(url: string): ParsedRepo | null {
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname
+    const parts = parsed.pathname.slice(1).split('/').filter(Boolean)
+    if (parts.length < 2) return null
+
+    if (host === 'github.com') {
+      return { platform: 'github', host, owner: parts[0], repoName: parts[1], projectPath: `${parts[0]}/${parts[1]}` }
+    }
+    if (host === 'codeberg.org') {
+      return { platform: 'codeberg', host, owner: parts[0], repoName: parts[1], projectPath: `${parts[0]}/${parts[1]}` }
+    }
+    if (host.includes('gitlab')) {
+      const projectPath = parts.join('/')
+      return { platform: 'gitlab', host, owner: parts[0], repoName: parts[parts.length - 1], projectPath }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 export function getDifficultyColor(difficulty: 'Easy' | 'Medium' | 'Hard'): string {
   switch (difficulty) {
     case 'Easy': return '#1cbaba'
