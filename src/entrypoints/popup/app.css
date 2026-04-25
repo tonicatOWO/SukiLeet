@@ -1,0 +1,71 @@
+:root {
+  /* Brand */
+  --clr-accent: #DD4D5C;
+  --clr-accent-hover: #e6717e;
+  --clr-accent-glow: rgb(221 77 92 / 10%);
+
+  /* Backgrounds */
+  --clr-bg: #1c1c1c;
+  --clr-surface: #2a2a2a;
+  --clr-surface-hover: #3a3a3a;
+
+  /* Borders */
+  --clr-border: #444;
+
+  /* Text */
+  --clr-text: #e5e5e5;
+  --clr-muted: #aaa;
+  --clr-dim: #888;
+  --clr-faint: #555;
+
+  /* Difficulty */
+  --clr-easy: #1cbaba;
+  --clr-medium: #ffb700;
+  --clr-hard: #ef4743;
+  --clr-easy-track: #1a4a3a;
+  --clr-medium-track: #4a3a0a;
+  --clr-hard-track: #4a1a1a;
+
+  /* Status */
+  --clr-error: #ef4743;
+  --clr-success: #2ecc71;
+
+  /* Neutral button */
+  --clr-btn: #555;
+  --clr-btn-hover: #666;
+
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: var(--clr-bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-width: 320px;
+  background-color: var(--clr-bg);
+}
+
+#app {
+  width: 320px;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+}

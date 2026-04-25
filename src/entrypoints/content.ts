@@ -1,0 +1,604 @@
+import '../assets/content.css'
+import {
+  githubToken,
+  githubRepo,
+  githubBranch,
+  separateFolder as separateFolderStorage,
+  customDir as customDirStorage,
+  keyboardShortcut as shortcutStorage,
+  solutionsPushed as solutionsPushedStorage,
+  dailyChallengesCount,
+} from '../lib/storage'
+
+const FILE_EXTENSIONS: Record<string, string> = {
+  C: '.c',
+  'C++': '.cpp',
+  'C#': '.cs',
+  Dart: '.dart',
+  Elixir: '.ex',
+  Erlang: '.erl',
+  Go: '.go',
+  Java: '.java',
+  JavaScript: '.js',
+  Kotlin: '.kt',
+  PHP: '.php',
+  Python: '.py',
+  Python3: '.py',
+  Racket: '.rkt',
+  Ruby: '.rb',
+  Rust: '.rs',
+  Scala: '.scala',
+  Swift: '.swift',
+  TypeScript: '.ts',
+  MySQL: '.sql',
+  PostgreSQL: '.sql',
+  Oracle: '.sql',
+  'MS SQL Server': '.tsql',
+  Pandas: '.py',
+}
+
+const LOCAL_STORAGE_KEYS: Record<string, string> = {
+  C: 'c',
+  'C++': 'cpp',
+  'C#': 'csharp',
+  Dart: 'dart',
+  Elixir: 'elixir',
+  Erlang: 'erlang',
+  Go: 'golang',
+  Java: 'java',
+  JavaScript: 'javascript',
+  Kotlin: 'kotlin',
+  PHP: 'php',
+  Python: 'python',
+  Python3: 'python3',
+  Racket: 'racket',
+  Ruby: 'ruby',
+  Rust: 'rust',
+  Scala: 'scala',
+  Swift: 'swift',
+  TypeScript: 'typeScript',
+  MySQL: 'mysql',
+  Oracle: 'oraclesql',
+  PostgreSQL: 'postgresql',
+  'MS SQL Server': 'mssql',
+  Pandas: 'pythondata',
+}
+
+const DATABASE_LANGUAGES = ['MySQL', 'Oracle', 'PostgreSQL', 'MS SQL Server', 'Pandas']
+
+const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+const DEFAULT_SHORTCUT = isMac ? { key: 'p', modifier: 'meta' } : { key: 'p', modifier: 'ctrl' }
+
+const SELECTORS = {
+  problemName:
+    'div.flex.items-start.justify-between.gap-4 > div.flex.items-start.gap-2 > div > a',
+  solutionLanguage: 'div.flex.h-full.flex-nowrap.items-center > div:nth-child(1) > button',
+  accepted:
+    'div.text-green-s.dark\\:text-dark-green-s.flex.flex-1.items-center.gap-2.text-\\[16px\\].font-medium.leading-6 > span',
+  parentDiv:
+    'div.flex.justify-between.py-1.pl-3.pr-1 > div.relative.flex.overflow-hidden.rounded.bg-fill-tertiary.dark\\:bg-fill-tertiary.\\!bg-transparent > div.flex-none.flex > div:nth-child(2)',
+  parentDivCodeEditor:
+    '#ide-top-btns > div:nth-child(1) > div > div > div:nth-child(2) > div > div:nth-child(2) > div > div:last-child',
+  codeBlock: 'div.px-4.py-3 > div > pre > code',
+  performanceMetrics:
+    'div.flex.items-center.justify-between.gap-2 > div > div.rounded-sd.flex.min-w-\\[275px\\].flex-1.cursor-pointer.flex-col.px-4.py-3.text-xs > div:nth-child(2) > span.font-semibold',
+}
+
+interface Shortcut {
+  key: string
+  modifier: string
+}
+
+interface ProblemInfo {
+  probNum: string
+  probName: string
+  fileName: string
+  solution: string
+  commitMsg: string
+  language: string
+}
+
+interface GithubConfig {
+  token: string
+  repo: string
+  branch: string
+  separateFolder: string
+  customDir: string
+}
+
+let KEYBOARD_SHORTCUT: Shortcut = DEFAULT_SHORTCUT
+let SHORTCUT_DISPLAY: string = getShortcutDisplayText(KEYBOARD_SHORTCUT)
+
+function getShortcutDisplayText(shortcut: Shortcut): string {
+  const sym =
+    shortcut.modifier === 'meta'
+      ? '⌘'
+      : shortcut.modifier === 'alt'
+        ? '⌥'
+        : shortcut.modifier === 'shift'
+          ? '⇧'
+          : 'Ctrl+'
+  return `${sym}${shortcut.key.toUpperCase()}`
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isSubmissionPage(): boolean {
+  return window.location.href.includes('submissions')
+}
+
+function hasAcceptedSolution(): boolean {
+  return !!document.querySelector(SELECTORS.accepted)
+}
+
+function initLeetPush() {
+  if (isSubmissionPage() && hasAcceptedSolution()) {
+    injectButtons()
+    extractProblemInfo()
+    registerKeyboardShortcut()
+  }
+}
+
+function registerKeyboardShortcut() {
+  document.addEventListener('keydown', (event) => {
+    if (
+      (KEYBOARD_SHORTCUT.modifier === 'meta' && event.metaKey) ||
+      (KEYBOARD_SHORTCUT.modifier === 'alt' && event.altKey) ||
+      (KEYBOARD_SHORTCUT.modifier === 'shift' && event.shiftKey) ||
+      (KEYBOARD_SHORTCUT.modifier === 'ctrl' && event.ctrlKey)
+    ) {
+      if (event.key.toLowerCase() === KEYBOARD_SHORTCUT.key.toLowerCase()) {
+        event.preventDefault()
+        handlePushClick()
+      }
+    }
+  })
+}
+
+function injectButtons() {
+  const parentDiv = document.querySelector(SELECTORS.parentDiv)
+  const parentDivCodeEditor = document.querySelector(SELECTORS.parentDivCodeEditor)
+
+  if (parentDiv) {
+    injectButtonsToParent(
+      parentDiv as HTMLElement,
+      'leetpush-div-edit',
+      'leetpush-btn-edit',
+      'Edit',
+      'leetpush-div',
+      'leetpush-btn',
+      `Push (${SHORTCUT_DISPLAY})`,
+      false,
+    )
+  }
+
+  if (parentDivCodeEditor) {
+    injectButtonsToParent(
+      parentDivCodeEditor as HTMLElement,
+      'leetpush-div-edit-CodeEditor',
+      'leetpush-btn-edit-CodeEditor',
+      'Edit',
+      'leetpush-div-CodeEditor',
+      'leetpush-btn-CodeEditor',
+      `Push (${SHORTCUT_DISPLAY})`,
+      true,
+    )
+  }
+}
+
+function injectButtonsToParent(
+  parent: HTMLElement,
+  editContainerId: string,
+  editButtonId: string,
+  editText: string,
+  pushContainerId: string,
+  pushButtonId: string,
+  pushText: string,
+  isCodeEditor: boolean,
+) {
+  if (document.getElementById(editContainerId) || document.getElementById(pushContainerId)) return
+
+  const editButton = createButton(editContainerId, editButtonId, editText, () => {
+    browser.runtime.openOptionsPage()
+  })
+
+  const pushButton = createButton(pushContainerId, pushButtonId, pushText, handlePushClick)
+
+  if (isCodeEditor) {
+    const divider1 = document.createElement('div')
+    divider1.style.cssText = 'background-color:#0f0f0f;width:1px;height:100%;flex-shrink:0'
+    const divider2 = document.createElement('div')
+    divider2.style.cssText = 'background-color:#0f0f0f;width:1px;height:100%;flex-shrink:0'
+    parent.appendChild(divider1)
+    parent.appendChild(editButton)
+    parent.appendChild(divider2)
+    parent.appendChild(pushButton)
+  } else {
+    parent.appendChild(editButton)
+    parent.appendChild(pushButton)
+  }
+}
+
+function createButton(
+  containerId: string,
+  buttonId: string,
+  text: string,
+  clickHandler: () => void,
+): HTMLElement {
+  const container = document.createElement('div')
+  container.id = containerId
+  const button = document.createElement('button')
+  button.id = buttonId
+  button.textContent = text
+  button.addEventListener('click', clickHandler)
+  container.appendChild(button)
+  return container
+}
+
+async function extractProblemInfo(): Promise<ProblemInfo | null> {
+  try {
+    const probNameElement = document.querySelector(SELECTORS.problemName)
+    if (!probNameElement) return null
+
+    const probNameText = probNameElement.textContent?.trim() || ''
+    if (!probNameText) return null
+
+    const probNum = probNameText.split('.')[0]?.trim() || ''
+    const probName =
+      probNameText
+        .replace(/^\d+\./, '')
+        .trim()
+        .replaceAll(' ', '-') || ''
+
+    if (!probNum || !probName) return null
+
+    const langElement = document.querySelector(SELECTORS.solutionLanguage)
+    if (!langElement) return null
+
+    const solutionLangText = langElement.textContent?.trim() || ''
+    if (!solutionLangText || !FILE_EXTENSIONS[solutionLangText]) return null
+
+    const fileExt = FILE_EXTENSIONS[solutionLangText]
+    const fileName = `${probName}${fileExt}`
+
+    const solutionsId = localStorage.key(0)?.split('_')[1] || ''
+    let solution = localStorage.getItem(
+      `${probNum}_${solutionsId}_${LOCAL_STORAGE_KEYS[solutionLangText]}`,
+    )
+
+    if (!solution) {
+      const codeElement = document.querySelector(SELECTORS.codeBlock)
+      solution = codeElement?.textContent || ''
+    } else {
+      solution = solution.replace(/\\n/g, '\n').replace(/ {2}/g, '  ').replace(/"/g, '')
+    }
+
+    if (!solution) return null
+
+    sessionStorage.setItem('fileName', fileName)
+    sessionStorage.setItem('solution', solution)
+
+    let commitMsg = ''
+    if (DATABASE_LANGUAGES.includes(solutionLangText)) {
+      const metrics = document.querySelectorAll(SELECTORS.performanceMetrics)
+      const queryRuntimeText = metrics[1]?.textContent || 'N/A'
+      commitMsg = `[${probNum}] [Time Beats: ${queryRuntimeText}] - SukiLeet`
+    } else {
+      const metrics = document.querySelectorAll(SELECTORS.performanceMetrics)
+      const runtimeText = metrics[1]?.textContent || 'N/A'
+      const memoryText = metrics[3]?.textContent || 'N/A'
+      commitMsg = `[${probNum}] [Time Beats: ${runtimeText}] [Memory Beats: ${memoryText}] - SukiLeet`
+    }
+
+    sessionStorage.setItem('commitMsg', commitMsg)
+
+    return { probNum, probName, fileName, solution, commitMsg, language: solutionLangText }
+  } catch (error) {
+    console.error('Error extracting problem info:', error)
+    return null
+  }
+}
+
+function updateButtonLabels() {
+  const buttons = [
+    document.querySelector<HTMLButtonElement>('#leetpush-btn'),
+    document.querySelector<HTMLButtonElement>('#leetpush-btn-CodeEditor'),
+  ]
+  buttons.forEach((btn) => {
+    if (btn) btn.textContent = `Push (${SHORTCUT_DISPLAY})`
+  })
+}
+
+async function getGithubConfig(): Promise<GithubConfig> {
+  const [token, repo, branch, separate, custom] = await Promise.all([
+    githubToken.getValue(),
+    githubRepo.getValue(),
+    githubBranch.getValue(),
+    separateFolderStorage.getValue(),
+    customDirStorage.getValue(),
+  ])
+  return { token, repo, branch, separateFolder: separate, customDir: custom }
+}
+
+function isConfigComplete(config: GithubConfig): boolean {
+  return !!(config.token && config.repo && config.branch)
+}
+
+function getPushButton(): HTMLButtonElement | null {
+  return (
+    document.querySelector<HTMLButtonElement>('#leetpush-btn') ||
+    document.querySelector<HTMLButtonElement>('#leetpush-btn-CodeEditor')
+  )
+}
+
+async function handlePushClick() {
+  const config = await getGithubConfig()
+
+  if (!isConfigComplete(config)) {
+    browser.runtime.openOptionsPage()
+    return
+  }
+
+  const pushBtn = getPushButton()
+  if (!pushBtn) {
+    alert('SukiLeet Error: Push button not found. Please refresh the page and try again.')
+    return
+  }
+
+  const problemInfo = await extractProblemInfo()
+  if (!problemInfo) {
+    alert('SukiLeet Error: Failed to extract problem information.')
+    return
+  }
+
+  const { fileName, solution, commitMsg } = problemInfo
+
+  if (!fileName || !solution || !commitMsg) {
+    alert('SukiLeet Error: Missing required data. Please try again.')
+    return
+  }
+
+  const [userName, repoName] = config.repo.split('/').slice(3, 5)
+  if (!userName || !repoName) {
+    alert('SukiLeet Error: Invalid repository URL. Please check your settings.')
+    browser.runtime.openOptionsPage()
+    return
+  }
+
+  pushBtn.disabled = true
+  pushBtn.textContent = 'Loading...'
+  pushBtn.classList.add('loading')
+
+  try {
+    await pushToGithub(
+      userName,
+      repoName,
+      config.branch,
+      fileName,
+      solution,
+      commitMsg,
+      config.token,
+      config.separateFolder,
+      config.customDir,
+      problemInfo,
+    )
+
+    pushBtn.classList.remove('loading')
+    pushBtn.classList.add('success')
+    pushBtn.textContent = 'Done'
+    await sleep(2000)
+    pushBtn.disabled = false
+    pushBtn.classList.remove('success')
+    pushBtn.textContent = `Push (${SHORTCUT_DISPLAY})`
+
+    const current = await solutionsPushedStorage.getValue()
+    await solutionsPushedStorage.setValue(current + 1)
+
+    try {
+      const [, dailyProblemNum] = await getDailyChallenge()
+      if (dailyProblemNum === problemInfo.probNum) {
+        const currentDC = await dailyChallengesCount.getValue()
+        await dailyChallengesCount.setValue(currentDC + 1)
+      }
+    } catch {
+      // non-critical
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Unknown error'
+    alert(`SukiLeet Error: ${msg}`)
+
+    pushBtn.classList.remove('loading')
+    pushBtn.classList.add('error')
+    pushBtn.textContent = 'Error'
+    await sleep(2000)
+    pushBtn.disabled = false
+    pushBtn.classList.remove('error')
+    pushBtn.textContent = `Push (${SHORTCUT_DISPLAY})`
+  }
+}
+
+async function pushToGithub(
+  userName: string,
+  repoName: string,
+  branch: string,
+  fileName: string,
+  content: string,
+  commitMsg: string,
+  token: string,
+  separateFolder: string,
+  customDir: string,
+  problemInfo: ProblemInfo,
+) {
+  if (!fileName?.trim()) throw new Error('Invalid file name. Please try again.')
+  if (!content?.trim()) throw new Error('No solution content found.')
+
+  let filePath = fileName
+
+  if (customDir) {
+    filePath = `${customDir}/${fileName}`
+  } else if (separateFolder === 'yes') {
+    try {
+      const [date, dailyProblemNum] = await getDailyChallenge()
+      if (dailyProblemNum === problemInfo.probNum) {
+        const splitDate = date.split('-')
+        const dailyFolder = `DCP-${splitDate[1]}-${splitDate[0].slice(2)}`
+        filePath = `${dailyFolder}/${fileName}`
+      }
+    } catch {
+      // continue without separate folder
+    }
+  }
+
+  if (!filePath?.trim()) throw new Error('Failed to generate a valid file path.')
+
+  return pushFileToRepo(userName, repoName, filePath, branch, content, commitMsg, token)
+}
+
+async function pushFileToRepo(
+  userName: string,
+  repoName: string,
+  filePath: string,
+  branch: string,
+  content: string,
+  commitMsg: string,
+  token: string,
+) {
+  const BASE_URL = 'https://api.github.com/repos'
+  const apiUrl = `${BASE_URL}/${userName}/${repoName}/contents/${filePath}`
+
+  const repoCheck = await fetch(`${BASE_URL}/${userName}/${repoName}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  if (!repoCheck.ok) {
+    const err = await repoCheck.json()
+    if (repoCheck.status === 404)
+      throw new Error(`Repository not found: ${userName}/${repoName}`)
+    if (repoCheck.status === 401) throw new Error('Authentication failed. Token may be invalid.')
+    if (repoCheck.status === 403) throw new Error('Access forbidden. Check token permissions.')
+    throw new Error(`Repository access error: ${err.message || 'Unknown error'}`)
+  }
+
+  const encodedContent = btoa(unescape(encodeURIComponent(content)))
+  const requestBody: Record<string, string> = {
+    message: commitMsg,
+    content: encodedContent,
+    branch,
+  }
+
+  const fileExistsRes = await fetch(`${apiUrl}?ref=${branch}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  if (fileExistsRes.ok) {
+    const existing = await fileExistsRes.json()
+    if (existing?.sha) requestBody.sha = existing.sha
+  } else if (fileExistsRes.status !== 404) {
+    const err = await fileExistsRes.json()
+    if (fileExistsRes.status === 403)
+      throw new Error('Permission denied. Token needs "contents: write" permission.')
+    if (fileExistsRes.status === 401) throw new Error('Authentication failed.')
+    throw new Error(`Error checking file: ${err.message || 'Unknown error'}`)
+  }
+
+  let response = await fetch(apiUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(requestBody),
+  })
+
+  let retryCount = 0
+  while (response.status === 409 && retryCount < 3) {
+    retryCount++
+    await sleep(500)
+    const latestRes = await fetch(`${apiUrl}?ref=${branch}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!latestRes.ok) continue
+    const latest = await latestRes.json()
+    if (latest?.sha) {
+      requestBody.sha = latest.sha
+      response = await fetch(apiUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(requestBody),
+      })
+      if (response.ok) break
+    }
+  }
+
+  if (!response.ok) {
+    let msg = `GitHub API Error: ${response.status}`
+    try {
+      const err = await response.json()
+      msg += ` - ${err.message || 'Unknown error'}`
+    } catch {}
+    throw new Error(msg)
+  }
+
+  return true
+}
+
+async function updateRepoDescription(token: string, repo: string) {
+  const [userName, repoName] = repo.split('/').slice(3, 5)
+  await fetch(`https://api.github.com/repos/${userName}/${repoName}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      description: 'Managed by SukiLeet extension',
+    }),
+  })
+}
+
+async function getDailyChallenge(): Promise<[string, string]> {
+  const response = await fetch('https://leetcode.com/graphql', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: `{
+        activeDailyCodingChallengeQuestion {
+          date
+          question { frontendQuestionId: questionFrontendId }
+        }
+      }`,
+    }),
+  })
+  const data = await response.json()
+  const q = data.data.activeDailyCodingChallengeQuestion
+  return [q.date, q.question.frontendQuestionId]
+}
+
+export default defineContentScript({
+  matches: ['*://*.leetcode.com/*'],
+  async main(ctx) {
+    const saved = await shortcutStorage.getValue()
+    if (saved) {
+      KEYBOARD_SHORTCUT = saved
+      SHORTCUT_DISPLAY = getShortcutDisplayText(KEYBOARD_SHORTCUT)
+    }
+
+    const unwatch = shortcutStorage.watch((newVal: { key: string; modifier: string } | null) => {
+      if (newVal) {
+        KEYBOARD_SHORTCUT = newVal
+        SHORTCUT_DISPLAY = getShortcutDisplayText(KEYBOARD_SHORTCUT)
+        updateButtonLabels()
+      }
+    })
+    ctx.onInvalidated(unwatch)
+
+    initLeetPush()
+
+    const observer = new MutationObserver(() => {
+      if (isSubmissionPage() && hasAcceptedSolution()) {
+        const hasButtons =
+          document.getElementById('leetpush-btn') ||
+          document.getElementById('leetpush-btn-CodeEditor')
+        if (!hasButtons) initLeetPush()
+      }
+    })
+
+    observer.observe(document.body, { childList: true, subtree: true })
+  },
+})
