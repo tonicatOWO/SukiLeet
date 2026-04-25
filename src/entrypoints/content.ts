@@ -130,6 +130,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function formatPushTimestamp(date = new Date()): string {
+  const pad = (value: number) => value.toString().padStart(2, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+}
+
+function addTimestampToFileName(fileName: string): string {
+  const lastDot = fileName.lastIndexOf('.')
+  const suffix = formatPushTimestamp()
+
+  if (lastDot <= 0) return `${fileName}-${suffix}`
+
+  const baseName = fileName.slice(0, lastDot)
+  const extension = fileName.slice(lastDot)
+  return `${baseName}-${suffix}${extension}`
+}
+
 function isSubmissionPage(): boolean {
   return window.location.href.includes('submissions')
 }
@@ -242,13 +258,13 @@ function createButton(
   return container
 }
 
-async function extractProblemInfo(): Promise<ProblemInfo | null> {
+async function extractProblemInfo(): Promise<ProblemInfo> {
   try {
     const probNameElement = document.querySelector(SELECTORS.problemName)
-    if (!probNameElement) return null
+    if (!probNameElement) throw new Error('Problem title not found. LeetCode layout may have changed.')
 
     const probNameText = probNameElement.textContent?.trim() || ''
-    if (!probNameText) return null
+    if (!probNameText) throw new Error('Problem title is empty.')
 
     const probNum = probNameText.split('.')[0]?.trim() || ''
     const probName =
@@ -257,13 +273,16 @@ async function extractProblemInfo(): Promise<ProblemInfo | null> {
         .trim()
         .replaceAll(' ', '-') || ''
 
-    if (!probNum || !probName) return null
+    if (!probNum || !probName) throw new Error('Problem title format is invalid.')
 
     const langElement = document.querySelector(SELECTORS.solutionLanguage)
-    if (!langElement) return null
+    if (!langElement) throw new Error('Solution language not found.')
 
     const solutionLangText = langElement.textContent?.trim() || ''
-    if (!solutionLangText || !FILE_EXTENSIONS[solutionLangText]) return null
+    if (!solutionLangText) throw new Error('Solution language is empty.')
+    if (!FILE_EXTENSIONS[solutionLangText]) {
+      throw new Error(`Unsupported solution language: ${solutionLangText}`)
+    }
 
     const fileExt = FILE_EXTENSIONS[solutionLangText]
     const fileName = `${probName}${fileExt}`
@@ -275,12 +294,13 @@ async function extractProblemInfo(): Promise<ProblemInfo | null> {
 
     if (!solution) {
       const codeElement = document.querySelector(SELECTORS.codeBlock)
-      solution = codeElement?.textContent || ''
+      if (!codeElement) throw new Error('Solution code block not found.')
+      solution = codeElement.textContent || ''
     } else {
       solution = solution.replace(/\\n/g, '\n').replace(/ {2}/g, '  ').replace(/"/g, '')
     }
 
-    if (!solution) return null
+    if (!solution.trim()) throw new Error('Solution content is empty.')
 
     sessionStorage.setItem('fileName', fileName)
     sessionStorage.setItem('solution', solution)
@@ -302,7 +322,7 @@ async function extractProblemInfo(): Promise<ProblemInfo | null> {
     return { probNum, probName, fileName, solution, commitMsg, language: solutionLangText }
   } catch (error) {
     console.error('Error extracting problem info:', error)
-    return null
+    throw error instanceof Error ? error : new Error('Failed to extract problem information.')
   }
 }
 
@@ -338,23 +358,41 @@ function getPushButton(): HTMLButtonElement | null {
   )
 }
 
+async function showPushButtonError(pushBtn: HTMLButtonElement | null, message: string) {
+  alert(`SukiLeet Error: ${message}`)
+
+  if (!pushBtn) return
+
+  pushBtn.classList.remove('loading')
+  pushBtn.classList.add('error')
+  pushBtn.textContent = 'Error'
+  pushBtn.disabled = true
+  await sleep(2000)
+  pushBtn.disabled = false
+  pushBtn.classList.remove('error')
+  pushBtn.textContent = `Push (${SHORTCUT_DISPLAY})`
+}
+
 async function handlePushClick() {
-  const config = await getRepoConfig()
-
-  if (!isConfigComplete(config)) {
-    browser.runtime.openOptionsPage()
-    return
-  }
-
   const pushBtn = getPushButton()
   if (!pushBtn) {
     alert('SukiLeet Error: Push button not found. Please refresh the page and try again.')
     return
   }
 
-  const problemInfo = await extractProblemInfo()
-  if (!problemInfo) {
-    alert('SukiLeet Error: Failed to extract problem information.')
+  const config = await getRepoConfig()
+
+  if (!isConfigComplete(config)) {
+    await showPushButtonError(pushBtn, 'Not set yet. Please configure token, repo URL, and branch first.')
+    return
+  }
+
+  let problemInfo: ProblemInfo
+  try {
+    problemInfo = await extractProblemInfo()
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Failed to extract problem information.'
+    await showPushButtonError(pushBtn, msg)
     return
   }
 
@@ -401,15 +439,7 @@ async function handlePushClick() {
     }
   } catch (error) {
     const msg = error instanceof Error ? getFriendlyWriteError(error.message) : 'Unknown error'
-    alert(`SukiLeet Error: ${msg}`)
-
-    pushBtn.classList.remove('loading')
-    pushBtn.classList.add('error')
-    pushBtn.textContent = 'Error'
-    await sleep(2000)
-    pushBtn.disabled = false
-    pushBtn.classList.remove('error')
-    pushBtn.textContent = `Push (${SHORTCUT_DISPLAY})`
+    await showPushButtonError(pushBtn, msg)
   }
 }
 
@@ -424,7 +454,7 @@ async function pushSolution(
   if (!fileName?.trim()) throw new Error('Invalid file name. Please try again.')
   if (!solution?.trim()) throw new Error('No solution content found.')
 
-  let filePath = fileName
+  let filePath = addTimestampToFileName(fileName)
 
   if (config.customDir) {
     filePath = `${config.customDir}/${fileName}`
@@ -434,11 +464,15 @@ async function pushSolution(
       if (dailyProblemNum === problemInfo.probNum) {
         const splitDate = date.split('-')
         const dailyFolder = `DCP-${splitDate[1]}-${splitDate[0].slice(2)}`
-        filePath = `${dailyFolder}/${fileName}`
+        filePath = `${dailyFolder}/${addTimestampToFileName(fileName)}`
       }
     } catch {
       // continue without separate folder
     }
+  }
+
+  if (config.customDir) {
+    filePath = `${config.customDir}/${addTimestampToFileName(fileName)}`
   }
 
   if (!filePath?.trim()) throw new Error('Failed to generate a valid file path.')

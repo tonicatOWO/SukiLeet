@@ -14,7 +14,8 @@
 
   let tokenInput = $state('')
   let repoInput = $state('')
-  let branchInput = $state('main')
+  let branchPreset = $state<'main' | 'master' | 'custom'>('main')
+  let customBranchInput = $state('')
   let separateFolderInput = $state('no')
   let customDirInput = $state('')
   let shortcutModifier = $state(isMac ? 'meta' : 'ctrl')
@@ -34,7 +35,13 @@
     ])
     tokenInput = token
     repoInput = repo
-    branchInput = branch
+    if (branch === 'main' || branch === 'master') {
+      branchPreset = branch
+      customBranchInput = ''
+    } else {
+      branchPreset = 'custom'
+      customBranchInput = branch
+    }
     separateFolderInput = separate
     customDirInput = custom
     if (shortcut) {
@@ -74,12 +81,20 @@
 
     saving = true
     const cleanRepo = repoInput.endsWith('.git') ? repoInput.slice(0, -4) : repoInput
+    const finalBranch = branchPreset === 'custom' ? customBranchInput.trim() : branchPreset
+
+    if (!finalBranch) {
+      errorMsg = 'Custom branch name cannot be empty'
+      saveStatus = 'error'
+      saving = false
+      return
+    }
 
     try {
       await Promise.all([
         repoToken.setValue(tokenInput),
         repoUrl.setValue(cleanRepo),
-        repoBranch.setValue(branchInput),
+        repoBranch.setValue(finalBranch),
         separateFolder.setValue(separateFolderInput),
         customDir.setValue(customDirInput),
         keyboardShortcut.setValue({ key: shortcutKey.toLowerCase(), modifier: shortcutModifier }),
@@ -153,20 +168,20 @@
       <legend>Repository Branch</legend>
       <div class="radios">
         <label class="radio-label">
-          <input type="radio" bind:group={branchInput} value="main" /> main
+          <input type="radio" bind:group={branchPreset} value="main" /> main
         </label>
         <label class="radio-label">
-          <input type="radio" bind:group={branchInput} value="master" /> trunk
+          <input type="radio" bind:group={branchPreset} value="master" /> master
         </label>
         <label class="radio-label">
-          <input type="radio" bind:group={branchInput} value="custom" /> custom
+          <input type="radio" bind:group={branchPreset} value="custom" /> custom
         </label>
       </div>
-      {#if branchInput === 'custom'}
+      {#if branchPreset === 'custom'}
         <input
           type="text"
           placeholder="Enter custom branch"
-          bind:value={branchInput}
+          bind:value={customBranchInput}
           class="custom-branch-input"
         />
       {/if}
